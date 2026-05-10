@@ -84,13 +84,12 @@ def calendar_url(date: datetime.date) -> str:
 
 
 def go_to_calendar(page: Page, date: datetime.date) -> None:
-    page.goto(calendar_url(date))
+    url = calendar_url(date)
+    page.goto(url)
     page.wait_for_load_state("networkidle")
-    # カレンダーのスロット要素がJSで描画されるのを待つ
-    try:
-        page.wait_for_selector("[data-event-id]", timeout=10000)
-    except Exception:
-        pass  # 要素がなければmissingとして扱う
+    page.wait_for_timeout(3000)
+    count = page.evaluate("() => document.querySelectorAll('[data-event-id]').length")
+    log.info(f"Calendar {date}: URL={page.url} elements={count}")
 
 
 # ── Existing reservation detection ───────────────────────────────────────────
