@@ -25,3 +25,5 @@ jobs:
 
       - name: Run reservation script
         run: python reserve.py
+        env:
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}

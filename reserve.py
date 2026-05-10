@@ -8,11 +8,14 @@ Usage:
 """
 from __future__ import annotations
 
+import os
 import sys
 import re
 import datetime
 import logging
+import smtplib
 import urllib.parse
+from email.mime.text import MIMEText
 from playwright.sync_api import sync_playwright, Page
 
 logging.basicConfig(
@@ -43,7 +46,27 @@ PRIORITY_SLOTS = [
 
 MAX_DAYS_SEARCH = 30
 SLOT_LABEL = {1: "打席①", 2: "打席②", 3: "打席③"}
+
+NOTIFY_EMAIL    = "shunsuke081981@gmail.com"
+GMAIL_APP_PASS  = os.environ.get("GMAIL_APP_PASSWORD", "")
 # ─────────────────────────────────────────────────────────────────────────────
+
+
+def send_email(subject: str, body: str) -> None:
+    if not GMAIL_APP_PASS:
+        log.warning("GMAIL_APP_PASSWORD not set — skipping email")
+        return
+    msg = MIMEText(body, "plain", "utf-8")
+    msg["Subject"] = subject
+    msg["From"]    = NOTIFY_EMAIL
+    msg["To"]      = NOTIFY_EMAIL
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+            smtp.login(NOTIFY_EMAIL, GMAIL_APP_PASS)
+            smtp.send_message(msg)
+        log.info("Email sent")
+    except Exception as e:
+        log.error(f"Email failed: {e}")
 
 
 def main() -> None:
@@ -302,13 +325,25 @@ def run_reservation_logic(page: Page) -> None:
             t, s = available[0]
             if make_reservation(page, target, t, s):
                 log.info("Done — reservation complete.")
+                send_email(
+                    subject=f"【SWING24】予約確定 {target} {t} {SLOT_LABEL[s]}",
+                    body=f"以下の予約が確定しました。\n\n  {target} {t} {SLOT_LABEL[s]}\n",
+                )
                 return
             log.warning("Reservation failed, trying next day")
 
         if cancel:
             log.info(f"{len(cancel)} CANCEL slot(s) on {target} — registering cancel-wait")
+            registered = []
             for t, s in cancel:
-                register_cancel_wait(page, target, t, s)
+                if register_cancel_wait(page, target, t, s):
+                    registered.append(f"  {target} {t} {SLOT_LABEL[s]}")
+            if registered:
+                lines = "\n".join(registered)
+                send_email(
+                    subject=f"【SWING24】キャンセル待ち登録 {target}",
+                    body=f"以下の枠でキャンセル待ちを登録しました。\n\n{lines}\n",
+                )
 
         if not available and not cancel:
             log.info(f"No available or cancel slots on {target} — next day")
