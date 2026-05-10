@@ -207,8 +207,14 @@ def make_reservation(page: Page, date: datetime.date, time_str: str, slot_num: i
         page.get_by_text("予約を登録する").first.click()
         page.wait_for_load_state("networkidle")
 
-        log.info(f"Reservation done: {date} {time_str} {label} ✓")
-        return True
+        url = page.url
+        body = page.evaluate("() => document.body.innerText")
+        if "thanks" in url or "予約を完了" in body or "完了しました" in body:
+            log.info(f"Reservation confirmed: {date} {time_str} {label} ✓")
+            return True
+        log.warning(f"Reservation completion unconfirmed — URL: {url}")
+        page.screenshot(path="/tmp/swing24_incomplete.png")
+        return False
 
     except Exception as e:
         log.error(f"Reservation failed: {e}")
@@ -272,11 +278,11 @@ def run_reservation_logic(page: Page) -> None:
     existing = find_existing_reservation_date(page)
 
     if existing:
-        log.info(f"Already has confirmed reservation on {existing} — nothing to do.")
-        return
-
-    start_date = datetime.date.today()
-    log.info(f"No confirmed reservation → searching from {start_date}")
+        start_date = existing + datetime.timedelta(days=1)
+        log.info(f"Confirmed reservation on {existing} → searching from {start_date}")
+    else:
+        start_date = datetime.date.today()
+        log.info(f"No confirmed reservation → searching from {start_date}")
 
     for offset in range(MAX_DAYS_SEARCH):
         target = start_date + datetime.timedelta(days=offset)
@@ -300,12 +306,12 @@ def run_reservation_logic(page: Page) -> None:
                 return
             log.warning("Reservation failed, trying next day")
 
-        elif cancel:
+        if cancel:
             log.info(f"{len(cancel)} CANCEL slot(s) on {target} — registering cancel-wait")
             for t, s in cancel:
                 register_cancel_wait(page, target, t, s)
 
-        else:
+        if not available and not cancel:
             log.info(f"No available or cancel slots on {target} — next day")
 
     log.info("Search complete — no slot reserved")
