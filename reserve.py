@@ -114,7 +114,7 @@ def find_existing_reservation_date(page: Page) -> datetime.date | None:
         if m:
             try:
                 dt = datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
-                if dt >= today:
+                if dt > today:
                     future_dates.append(dt)
                     log.info(f"  Found confirmed: {dt}")
             except ValueError:
