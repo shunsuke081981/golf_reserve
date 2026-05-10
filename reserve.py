@@ -306,6 +306,8 @@ def run_reservation_logic(page: Page) -> None:
         start_date = datetime.date.today()
         log.info(f"No confirmed reservation → searching from {start_date}")
 
+    all_cancel_registered: list[str] = []
+
     for offset in range(MAX_DAYS_SEARCH):
         target = start_date + datetime.timedelta(days=offset)
         log.info(f"=== Checking {target} ===")
@@ -325,28 +327,24 @@ def run_reservation_logic(page: Page) -> None:
             t, s = available[0]
             if make_reservation(page, target, t, s):
                 log.info("Done — reservation complete.")
-                send_email(
-                    subject=f"【SWING24】予約確定 {target} {t} {SLOT_LABEL[s]}",
-                    body=f"以下の予約が確定しました。\n\n  {target} {t} {SLOT_LABEL[s]}\n",
-                )
                 return
             log.warning("Reservation failed, trying next day")
 
         if cancel:
             log.info(f"{len(cancel)} CANCEL slot(s) on {target} — registering cancel-wait")
-            registered = []
             for t, s in cancel:
                 if register_cancel_wait(page, target, t, s):
-                    registered.append(f"  {target} {t} {SLOT_LABEL[s]}")
-            if registered:
-                lines = "\n".join(registered)
-                send_email(
-                    subject=f"【SWING24】キャンセル待ち登録 {target}",
-                    body=f"以下の枠でキャンセル待ちを登録しました。\n\n{lines}\n",
-                )
+                    all_cancel_registered.append(f"  {target} {t} {SLOT_LABEL[s]}")
 
         if not available and not cancel:
             log.info(f"No available or cancel slots on {target} — next day")
+
+    if all_cancel_registered:
+        lines = "\n".join(all_cancel_registered)
+        send_email(
+            subject="【SWING24】キャンセル待ち登録完了",
+            body=f"以下の枠でキャンセル待ちを登録しました。\n\n{lines}\n",
+        )
 
     log.info("Search complete — no slot reserved")
 
