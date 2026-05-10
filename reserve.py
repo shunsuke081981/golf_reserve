@@ -8,14 +8,11 @@ Usage:
 """
 from __future__ import annotations
 
-import os
 import sys
 import re
 import datetime
 import logging
-import smtplib
 import urllib.parse
-from email.mime.text import MIMEText
 from playwright.sync_api import sync_playwright, Page
 
 logging.basicConfig(
@@ -44,26 +41,7 @@ PRIORITY_SLOTS = [
 
 MAX_DAYS_SEARCH = 30
 SLOT_LABEL      = {1: "打席①", 2: "打席②", 3: "打席③"}
-NOTIFY_EMAIL    = "shunsuke081981@gmail.com"
-GMAIL_APP_PASS  = os.environ.get("GMAIL_APP_PASSWORD", "")
 # ─────────────────────────────────────────────────────────────────────────────
-
-
-def send_email(subject: str, body: str) -> None:
-    if not GMAIL_APP_PASS:
-        log.warning("GMAIL_APP_PASSWORD not set — skipping email")
-        return
-    msg = MIMEText(body, "plain", "utf-8")
-    msg["Subject"] = subject
-    msg["From"]    = NOTIFY_EMAIL
-    msg["To"]      = NOTIFY_EMAIL
-    try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
-            smtp.login(NOTIFY_EMAIL, GMAIL_APP_PASS)
-            smtp.send_message(msg)
-        log.info("Email sent")
-    except Exception as e:
-        log.error(f"Email failed: {e}")
 
 
 def main() -> None:
@@ -263,7 +241,6 @@ def run_reservation_logic(page: Page) -> None:
         log.info(f"No confirmed reservation → searching from {start_date}")
 
     tomorrow = datetime.date.today() + datetime.timedelta(days=1)
-    cancel_wait_registered: list[str] = []
 
     for offset in range(MAX_DAYS_SEARCH):
         target = start_date + datetime.timedelta(days=offset)
@@ -291,18 +268,10 @@ def run_reservation_logic(page: Page) -> None:
         if target == tomorrow and len(cancel) == len(PRIORITY_SLOTS):
             log.info("All 6 slots are CANCEL for tomorrow — registering cancel-wait")
             for time_str, slot_num in PRIORITY_SLOTS:
-                if register_cancel_wait(page, target, time_str, slot_num):
-                    cancel_wait_registered.append(f"  {target} {time_str} {SLOT_LABEL[slot_num]}")
+                register_cancel_wait(page, target, time_str, slot_num)
 
         if not available and not cancel:
             log.info(f"No available or cancel slots on {target} — next day")
-
-    if cancel_wait_registered:
-        lines = "\n".join(cancel_wait_registered)
-        send_email(
-            subject=f"【SWING24】キャンセル待ち登録完了 {tomorrow}",
-            body=f"以下の枠でキャンセル待ちを登録しました。\n\n{lines}\n",
-        )
 
     log.info("Search complete — no slot reserved")
 
