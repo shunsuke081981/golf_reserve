@@ -98,16 +98,13 @@ def find_existing_reservation_date(page: Page) -> datetime.date | None:
     today = today_jst()
     future_dates = []
 
-    # 各行のinnerTextを個別に取得して確定+日付をペアで探す
-    rows = page.evaluate("""() => {
-        const els = document.querySelectorAll('tr, li, [class*="item"], [class*="row"]');
-        return Array.from(els).map(e => e.innerText.trim()).filter(t => t.length > 0);
-    }""")
-
-    for row in rows:
-        if "確定" not in row:
+    text = page.evaluate("() => document.body.innerText")
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    for i, line in enumerate(lines):
+        if "確定" not in line:
             continue
-        m = re.search(r"(\d{4})/(\d{2})/(\d{2})", row)
+        search_window = " ".join(lines[max(0, i-1):i+4])
+        m = re.search(r"(\d{4})/(\d{2})/(\d{2})", search_window)
         if m:
             try:
                 dt = datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
@@ -249,10 +246,12 @@ def run_reservation_logic(page: Page) -> None:
     # ① 明日のキャンセル待ち（確定予約の有無に関わらず実行）
     log.info(f"=== Cancel-wait check for {tomorrow} ===")
     go_to_calendar(page, tomorrow)
-    cancel_tomorrow = [
-        (t, s) for t, s in PRIORITY_SLOTS
-        if get_slot_status(page, tomorrow, t, s) == "cancel"
-    ]
+    cancel_tomorrow = []
+    for t, s in PRIORITY_SLOTS:
+        st = get_slot_status(page, tomorrow, t, s)
+        log.info(f"  {t} {SLOT_LABEL[s]}: {st}")
+        if st == "cancel":
+            cancel_tomorrow.append((t, s))
     if cancel_tomorrow:
         log.info(f"{len(cancel_tomorrow)} CANCEL slot(s) on {tomorrow} — registering cancel-wait")
         for t, s in cancel_tomorrow:
