@@ -283,6 +283,8 @@ def run_reservation_logic(page: Page) -> None:
         start_date = datetime.date.today()
         log.info(f"No confirmed reservation → searching from {start_date}")
 
+    tomorrow = datetime.date.today() + datetime.timedelta(days=1)
+
     for offset in range(MAX_DAYS_SEARCH):
         target = start_date + datetime.timedelta(days=offset)
         log.info(f"=== Checking {target} ===")
@@ -305,7 +307,7 @@ def run_reservation_logic(page: Page) -> None:
                 return
             log.warning("Reservation failed, trying next day")
 
-        if cancel:
+        if cancel and target == tomorrow:
             log.info(f"{len(cancel)} CANCEL slot(s) on {target} — registering cancel-wait")
             for t, s in cancel:
                 register_cancel_wait(page, target, t, s)
