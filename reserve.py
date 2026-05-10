@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """
-SWING24 Golf Range Cancel-Wait Registration
+SWING24 Golf Range Auto-Reservation
 
-Checks tomorrow's 6 slots. If ALL are CANCEL, registers cancel-wait for all
-and sends a notification email.
+Usage:
+    python3 reserve.py           # headless (production)
+    python3 reserve.py --debug   # visible browser for testing
 """
 from __future__ import annotations
 
 import os
 import sys
+import re
 import datetime
 import logging
 import smtplib
@@ -40,9 +42,10 @@ PRIORITY_SLOTS = [
     ("20:00", 2),
 ]
 
-SLOT_LABEL     = {1: "打席①", 2: "打席②", 3: "打席③"}
-NOTIFY_EMAIL   = "shunsuke081981@gmail.com"
-GMAIL_APP_PASS = os.environ.get("GMAIL_APP_PASSWORD", "")
+MAX_DAYS_SEARCH = 30
+SLOT_LABEL      = {1: "打席①", 2: "打席②", 3: "打席③"}
+NOTIFY_EMAIL    = "shunsuke081981@gmail.com"
+GMAIL_APP_PASS  = os.environ.get("GMAIL_APP_PASSWORD", "")
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -76,6 +79,8 @@ def main() -> None:
             browser.close()
 
 
+# ── Login ─────────────────────────────────────────────────────────────────────
+
 def login(page: Page) -> None:
     log.info("Logging in…")
     page.goto(URL_LOGIN)
@@ -87,6 +92,8 @@ def login(page: Page) -> None:
     log.info("Logged in")
 
 
+# ── Calendar navigation ───────────────────────────────────────────────────────
+
 def calendar_url(date: datetime.date) -> str:
     d = urllib.parse.quote(date.strftime("%Y/%m/%d"), safe="")
     return f"{BASE_URL}/reservations/calendar?date={d}&calendar_type=2"
@@ -96,6 +103,43 @@ def go_to_calendar(page: Page, date: datetime.date) -> None:
     page.goto(calendar_url(date))
     page.wait_for_load_state("networkidle")
 
+
+# ── Existing reservation detection ───────────────────────────────────────────
+
+def find_existing_reservation_date(page: Page) -> datetime.date | None:
+    log.info("Checking reservation history…")
+    page.goto(f"{BASE_URL}/reservations/history")
+    page.wait_for_load_state("networkidle")
+
+    text = page.evaluate("() => document.body.innerText")
+    today = datetime.date.today()
+    future_dates = []
+
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    for i, line in enumerate(lines):
+        if "確定" not in line:
+            continue
+        search_window = " ".join(lines[max(0, i-1):i+3])
+        m = re.search(r"(\d{4})/(\d{2})/(\d{2})", search_window)
+        if m:
+            try:
+                dt = datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+                if dt > today:
+                    future_dates.append(dt)
+                    log.info(f"  Found confirmed: {dt}")
+            except ValueError:
+                pass
+
+    if future_dates:
+        latest = max(future_dates)
+        log.info(f"Latest confirmed reservation: {latest}")
+        return latest
+
+    log.info("No confirmed upcoming reservation found")
+    return None
+
+
+# ── Slot status ───────────────────────────────────────────────────────────────
 
 def get_slot_status(page: Page, date: datetime.date, time_str: str, slot_num: int) -> str:
     event_id  = EVENT_IDS[slot_num]
@@ -114,6 +158,60 @@ def get_slot_status(page: Page, date: datetime.date, time_str: str, slot_num: in
         [str(event_id), timestamp],
     )
 
+
+# ── Reservation (AVAILABLE slot) ─────────────────────────────────────────────
+
+def make_reservation(page: Page, date: datetime.date, time_str: str, slot_num: int) -> bool:
+    label = SLOT_LABEL[slot_num]
+    log.info(f"Reserving {date} {time_str} {label}…")
+
+    go_to_calendar(page, date)
+
+    event_id  = EVENT_IDS[slot_num]
+    timestamp = f"{date.strftime('%Y/%m/%d')} {time_str}"
+
+    data_url = page.evaluate(
+        """([eid, ts]) => {
+            const el = document.querySelector(
+                `[data-event-id="${eid}"][data-usage-timestamp="${ts}"]`
+            );
+            return el ? el.getAttribute('data-url') : null;
+        }""",
+        [str(event_id), timestamp],
+    )
+
+    if not data_url:
+        log.error("Slot cell not found on calendar")
+        return False
+
+    page.goto(BASE_URL + data_url)
+    page.wait_for_load_state("networkidle")
+    log.info(f"Reservation form: {page.url}")
+
+    try:
+        page.locator("label[for='reservations-add-reservation-terms']").click(force=True)
+        page.locator("button[type='submit']", has_text="内容確認").click()
+        page.wait_for_load_state("networkidle")
+        log.info(f"Confirmation page: {page.url}")
+
+        page.get_by_text("予約を登録する").first.click()
+        page.wait_for_load_state("networkidle")
+
+        body = page.evaluate("() => document.body.innerText")
+        if "予約を受け付けました" in body or "予約ID" in body:
+            log.info(f"Reservation confirmed: {date} {time_str} {label} ✓")
+            return True
+        log.warning(f"Reservation completion unconfirmed — URL: {page.url}")
+        page.screenshot(path="/tmp/swing24_incomplete.png")
+        return False
+
+    except Exception as e:
+        log.error(f"Reservation failed: {e}")
+        page.screenshot(path="/tmp/swing24_error.png")
+        return False
+
+
+# ── Cancel-wait (CANCEL slot) ─────────────────────────────────────────────────
 
 def register_cancel_wait(page: Page, date: datetime.date, time_str: str, slot_num: int) -> bool:
     label = SLOT_LABEL[slot_num]
@@ -152,36 +250,61 @@ def register_cancel_wait(page: Page, date: datetime.date, time_str: str, slot_nu
         return False
 
 
+# ── Main logic ────────────────────────────────────────────────────────────────
+
 def run_reservation_logic(page: Page) -> None:
+    existing = find_existing_reservation_date(page)
+
+    if existing:
+        start_date = existing + datetime.timedelta(days=1)
+        log.info(f"Confirmed reservation on {existing} → searching from {start_date}")
+    else:
+        start_date = datetime.date.today()
+        log.info(f"No confirmed reservation → searching from {start_date}")
+
     tomorrow = datetime.date.today() + datetime.timedelta(days=1)
-    log.info(f"Checking {tomorrow} (tomorrow)")
+    cancel_wait_registered: list[str] = []
 
-    go_to_calendar(page, tomorrow)
+    for offset in range(MAX_DAYS_SEARCH):
+        target = start_date + datetime.timedelta(days=offset)
+        log.info(f"=== Checking {target} ===")
 
-    statuses = {}
-    for time_str, slot_num in PRIORITY_SLOTS:
-        st = get_slot_status(page, tomorrow, time_str, slot_num)
-        statuses[(time_str, slot_num)] = st
-        log.info(f"  {time_str} {SLOT_LABEL[slot_num]}: {st}")
+        go_to_calendar(page, target)
 
-    all_cancel = all(statuses[(t, s)] == "cancel" for t, s in PRIORITY_SLOTS)
-    if not all_cancel:
-        log.info("Not all 6 slots are CANCEL — nothing to do.")
-        return
+        statuses: dict[tuple[str, int], str] = {}
+        for time_str, slot_num in PRIORITY_SLOTS:
+            st = get_slot_status(page, target, time_str, slot_num)
+            statuses[(time_str, slot_num)] = st
+            log.info(f"  {time_str} {SLOT_LABEL[slot_num]}: {st}")
 
-    log.info("All 6 slots are CANCEL — registering cancel-wait for all")
-    registered = []
-    for time_str, slot_num in PRIORITY_SLOTS:
-        if register_cancel_wait(page, tomorrow, time_str, slot_num):
-            registered.append(f"  {tomorrow} {time_str} {SLOT_LABEL[slot_num]}")
+        available = [(t, s) for t, s in PRIORITY_SLOTS if statuses.get((t, s)) == "available"]
+        cancel    = [(t, s) for t, s in PRIORITY_SLOTS if statuses.get((t, s)) == "cancel"]
 
-    if registered:
-        lines = "\n".join(registered)
+        if available:
+            t, s = available[0]
+            if make_reservation(page, target, t, s):
+                log.info("Done — reservation complete.")
+                return
+            log.warning("Reservation failed, trying next day")
+
+        # Cancel-wait: tomorrow only, and only when all 6 slots are CANCEL
+        if target == tomorrow and len(cancel) == len(PRIORITY_SLOTS):
+            log.info("All 6 slots are CANCEL for tomorrow — registering cancel-wait")
+            for time_str, slot_num in PRIORITY_SLOTS:
+                if register_cancel_wait(page, target, time_str, slot_num):
+                    cancel_wait_registered.append(f"  {target} {time_str} {SLOT_LABEL[slot_num]}")
+
+        if not available and not cancel:
+            log.info(f"No available or cancel slots on {target} — next day")
+
+    if cancel_wait_registered:
+        lines = "\n".join(cancel_wait_registered)
         send_email(
             subject=f"【SWING24】キャンセル待ち登録完了 {tomorrow}",
             body=f"以下の枠でキャンセル待ちを登録しました。\n\n{lines}\n",
         )
-    log.info("Done.")
+
+    log.info("Search complete — no slot reserved")
 
 
 if __name__ == "__main__":
