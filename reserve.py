@@ -207,12 +207,11 @@ def make_reservation(page: Page, date: datetime.date, time_str: str, slot_num: i
         page.get_by_text("予約を登録する").first.click()
         page.wait_for_load_state("networkidle")
 
-        url = page.url
         body = page.evaluate("() => document.body.innerText")
-        if "thanks" in url or "予約を完了" in body or "完了しました" in body:
+        if "予約を受け付けました" in body or "予約ID" in body:
             log.info(f"Reservation confirmed: {date} {time_str} {label} ✓")
             return True
-        log.warning(f"Reservation completion unconfirmed — URL: {url}")
+        log.warning(f"Reservation completion unconfirmed — URL: {page.url}")
         page.screenshot(path="/tmp/swing24_incomplete.png")
         return False
 
