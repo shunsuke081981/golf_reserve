@@ -253,42 +253,40 @@ def run_reservation_logic(page: Page) -> None:
     today    = today_jst()
     tomorrow = today + datetime.timedelta(days=1)
 
-    # ① 既存予約チェック — 確定あれば即終了
-    existing = find_existing_reservation_date(page)
-    if existing:
-        log.info("Reservation already exists. Stopping.")
-        return
+    # ① 既存予約チェック — 確定あれば新規探索をスキップ
+    secured_date = find_existing_reservation_date(page)
+    if secured_date:
+        log.info(f"Reservation already exists on {secured_date}. Skipping search.")
+    else:
+        # ② 新規予約探索（今日〜10日後）
+        for offset in range(11):
+            target = today + datetime.timedelta(days=offset)
+            log.info(f"=== Checking {target} ===")
+            go_to_calendar(page, target)
 
-    # ② 新規予約探索（今日〜10日後）
-    reserved_date = None
-    for offset in range(11):
-        target = today + datetime.timedelta(days=offset)
-        log.info(f"=== Checking {target} ===")
-        go_to_calendar(page, target)
+            statuses: dict[tuple[str, int], str] = {}
+            for time_str, slot_num in PRIORITY_SLOTS:
+                st = get_slot_status(page, target, time_str, slot_num)
+                statuses[(time_str, slot_num)] = st
+                log.info(f"  {time_str} {SLOT_LABEL[slot_num]}: {st}")
 
-        statuses: dict[tuple[str, int], str] = {}
-        for time_str, slot_num in PRIORITY_SLOTS:
-            st = get_slot_status(page, target, time_str, slot_num)
-            statuses[(time_str, slot_num)] = st
-            log.info(f"  {time_str} {SLOT_LABEL[slot_num]}: {st}")
-
-        if all(s == "missing" for s in statuses.values()):
-            log.info(f"All slots missing on {target} — outside booking window, stopping.")
-            break
-
-        available = [(t, s) for t, s in PRIORITY_SLOTS if statuses.get((t, s)) == "available"]
-        if available:
-            t, s = available[0]
-            if make_reservation(page, target, t, s):
-                log.info("Done — reservation complete.")
-                reserved_date = target
+            if all(s == "missing" for s in statuses.values()):
+                log.info(f"All slots missing on {target} — outside booking window, stopping.")
                 break
-            log.warning("Reservation failed, trying next day")
-        else:
-            log.info(f"No available slots on {target} — next day")
+
+            available = [(t, s) for t, s in PRIORITY_SLOTS if statuses.get((t, s)) == "available"]
+            if available:
+                t, s = available[0]
+                if make_reservation(page, target, t, s):
+                    log.info("Done — reservation complete.")
+                    secured_date = target
+                    break
+                log.warning("Reservation failed, trying next day")
+            else:
+                log.info(f"No available slots on {target} — next day")
 
     # ③ 明日のキャンセル待ち（明日が未確保の場合のみ）
-    if reserved_date == tomorrow:
+    if secured_date == tomorrow:
         log.info("Tomorrow's slot secured. Skipping cancel-wait.")
         return
 
