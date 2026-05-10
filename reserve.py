@@ -95,16 +95,19 @@ def find_existing_reservation_date(page: Page) -> datetime.date | None:
     page.goto(f"{BASE_URL}/reservations/history")
     page.wait_for_load_state("networkidle")
 
-    text = page.evaluate("() => document.body.innerText")
     today = today_jst()
     future_dates = []
 
-    lines = [l.strip() for l in text.split("\n") if l.strip()]
-    for i, line in enumerate(lines):
-        if "確定" not in line:
+    # 各行のinnerTextを個別に取得して確定+日付をペアで探す
+    rows = page.evaluate("""() => {
+        const els = document.querySelectorAll('tr, li, [class*="item"], [class*="row"]');
+        return Array.from(els).map(e => e.innerText.trim()).filter(t => t.length > 0);
+    }""")
+
+    for row in rows:
+        if "確定" not in row:
             continue
-        search_window = " ".join(lines[max(0, i-1):i+3])
-        m = re.search(r"(\d{4})/(\d{2})/(\d{2})", search_window)
+        m = re.search(r"(\d{4})/(\d{2})/(\d{2})", row)
         if m:
             try:
                 dt = datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
@@ -277,6 +280,13 @@ def run_reservation_logic(page: Page) -> None:
             statuses[(time_str, slot_num)] = st
             log.info(f"  {time_str} {SLOT_LABEL[slot_num]}: {st}")
 
+        all_statuses = list(statuses.values())
+
+        # 全枠missingは予約受付期間外 → それ以降も同様なので終了
+        if all(s == "missing" for s in all_statuses):
+            log.info(f"All slots missing on {target} — outside booking window, stopping.")
+            break
+
         available = [(t, s) for t, s in PRIORITY_SLOTS if statuses.get((t, s)) == "available"]
 
         if available:
@@ -293,3 +303,4 @@ def run_reservation_logic(page: Page) -> None:
 
 if __name__ == "__main__":
     main()
+
