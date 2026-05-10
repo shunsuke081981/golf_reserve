@@ -69,10 +69,23 @@ def login(page: Page) -> None:
     log.info("Logging in…")
     page.goto(URL_LOGIN)
     page.wait_for_load_state("networkidle")
+    log.info(f"Login page URL: {page.url}")
+
+    # フォームの全inputを確認
+    inputs = page.evaluate("""() => {
+        return Array.from(document.querySelectorAll('input')).map(el => ({
+            type: el.type, name: el.name, id: el.id, placeholder: el.placeholder
+        }));
+    }""")
+    log.info(f"Inputs on login page: {inputs}")
+
     page.locator("input[type='text'], input[name*='id'], input[name*='login']").first.fill(USERNAME)
     page.locator("input[type='password']").first.fill(PASSWORD)
     page.locator("button[type='submit'], input[type='submit']").first.click()
     page.wait_for_load_state("networkidle")
+    log.info(f"After login URL: {page.url}")
+    if "/auth/login" in page.url:
+        raise RuntimeError("Login failed — still on login page")
     log.info("Logged in")
 
 
