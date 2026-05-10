@@ -2,9 +2,15 @@ name: Golf Auto-Reservation
 
 on:
   schedule:
+    - cron: "0 4 * * *"    # 13:00 JST
+    - cron: "0 6 * * *"    # 15:00 JST
+    - cron: "0 7 * * *"    # 16:00 JST
+    - cron: "0 8 * * *"    # 17:00 JST
+    - cron: "0 9 * * *"    # 18:00 JST
+    - cron: "0 10 * * *"   # 19:00 JST
     - cron: "0 11 * * *"   # 20:00 JST
     - cron: "0 12 * * *"   # 21:00 JST
-  workflow_dispatch:         # 手動実行も可能
+  workflow_dispatch:
 
 jobs:
   reserve:
@@ -25,3 +31,6 @@ jobs:
 
       - name: Run reservation script
         run: python reserve.py
+        env:
+          SWING24_USERNAME: ${{ secrets.SWING24_USERNAME }}
+          SWING24_PASSWORD: ${{ secrets.SWING24_PASSWORD }}

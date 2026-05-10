@@ -8,6 +8,7 @@ Usage:
 """
 from __future__ import annotations
 
+import os
 import sys
 import re
 import datetime
@@ -25,8 +26,8 @@ log = logging.getLogger(__name__)
 # ── Config ───────────────────────────────────────────────────────────────────
 BASE_URL  = "https://swing24-kayabacho.revn.jp"
 URL_LOGIN = f"{BASE_URL}/auth/login"
-USERNAME  = "060010"
-PASSWORD  = "kybc0819"
+USERNAME  = os.environ["SWING24_USERNAME"]
+PASSWORD  = os.environ["SWING24_PASSWORD"]
 
 EVENT_IDS = {1: 15, 2: 22, 3: 23}  # slot_number → event_id
 
