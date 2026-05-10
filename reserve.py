@@ -86,6 +86,11 @@ def calendar_url(date: datetime.date) -> str:
 def go_to_calendar(page: Page, date: datetime.date) -> None:
     page.goto(calendar_url(date))
     page.wait_for_load_state("networkidle")
+    # カレンダーのスロット要素がJSで描画されるのを待つ
+    try:
+        page.wait_for_selector("[data-event-id]", timeout=10000)
+    except Exception:
+        pass  # 要素がなければmissingとして扱う
 
 
 # ── Existing reservation detection ───────────────────────────────────────────
