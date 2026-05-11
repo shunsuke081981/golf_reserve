@@ -50,6 +50,10 @@ def today_jst() -> datetime.date:
     return datetime.datetime.now(JST).date()
 
 
+def now_jst() -> datetime.datetime:
+    return datetime.datetime.now(JST)
+
+
 def main() -> None:
     debug = "--debug" in sys.argv
     with sync_playwright() as p:
@@ -105,7 +109,7 @@ def find_existing_reservation_date(page: Page) -> datetime.date | None:
     page.goto(f"{BASE_URL}/reservations/history")
     page.wait_for_load_state("networkidle")
 
-    today = today_jst()
+    now = now_jst()
     future_dates = []
 
     text = page.evaluate("() => document.body.innerText")
@@ -114,13 +118,19 @@ def find_existing_reservation_date(page: Page) -> datetime.date | None:
         if "確定" not in line:
             continue
         search_window = " ".join(lines[max(0, i-1):i+4])
-        m = re.search(r"(\d{4})/(\d{2})/(\d{2})", search_window)
+        m = re.search(r"(\d{4})/(\d{2})/(\d{2})[^\d]*(\d{2}):(\d{2})", search_window)
         if m:
             try:
-                dt = datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
-                if dt >= today:
-                    future_dates.append(dt)
-                    log.info(f"  Found confirmed: {dt}")
+                reservation_dt = datetime.datetime(
+                    int(m.group(1)), int(m.group(2)), int(m.group(3)),
+                    int(m.group(4)), int(m.group(5)),
+                    tzinfo=JST,
+                )
+                if reservation_dt > now:
+                    future_dates.append(reservation_dt.date())
+                    log.info(f"  Found confirmed (future): {reservation_dt}")
+                else:
+                    log.info(f"  Found confirmed (past, skipped): {reservation_dt}")
             except ValueError:
                 pass
 
@@ -247,6 +257,30 @@ def register_cancel_wait(page: Page, date: datetime.date, time_str: str, slot_nu
         return False
 
 
+# ── Cancel existing reservation ──────────────────────────────────────────────
+
+def cancel_reservation(page: Page, date: datetime.date) -> bool:
+    log.info(f"Cancelling reservation on {date}…")
+    page.goto(f"{BASE_URL}/reservations/history")
+    page.wait_for_load_state("networkidle")
+
+    date_str = date.strftime("%Y/%m/%d")
+    try:
+        row = page.locator("tr").filter(has_text=date_str).filter(has_text="確定")
+        row.first.get_by_text("詳細").click()
+        page.wait_for_load_state("networkidle")
+        log.info(f"Detail page: {page.url}")
+
+        page.get_by_text("キャンセル").first.click()
+        page.wait_for_load_state("networkidle")
+        log.info(f"Reservation on {date} cancelled ✓")
+        return True
+    except Exception as e:
+        log.error(f"Cancel failed: {e}")
+        page.screenshot(path="/tmp/swing24_cancel_reservation_error.png")
+        return False
+
+
 # ── Main logic ────────────────────────────────────────────────────────────────
 
 def run_reservation_logic(page: Page) -> None:
@@ -285,25 +319,42 @@ def run_reservation_logic(page: Page) -> None:
             else:
                 log.info(f"No available slots on {target} — next day")
 
-    # ③ 明日のキャンセル待ち（明日が未確保の場合のみ）
+    # ③ 明日のチェック（明日がすでに確保済みなら何もしない）
     if secured_date == tomorrow:
-        log.info("Tomorrow's slot secured. Skipping cancel-wait.")
+        log.info("Tomorrow's slot secured. Skipping tomorrow's check.")
         return
 
-    log.info(f"=== Cancel-wait check for {tomorrow} ===")
+    log.info(f"=== Tomorrow's check for {tomorrow} ===")
     go_to_calendar(page, tomorrow)
-    cancel_slots = []
-    for t, s in PRIORITY_SLOTS:
-        st = get_slot_status(page, tomorrow, t, s)
-        log.info(f"  {t} {SLOT_LABEL[s]}: {st}")
-        if st == "cancel":
-            cancel_slots.append((t, s))
-    if cancel_slots:
-        log.info(f"{len(cancel_slots)} CANCEL slot(s) on {tomorrow} — registering cancel-wait")
-        for t, s in cancel_slots:
-            register_cancel_wait(page, tomorrow, t, s)
-    else:
-        log.info(f"No CANCEL slots on {tomorrow}")
+
+    tomorrow_statuses: dict[tuple[str, int], str] = {}
+    for time_str, slot_num in PRIORITY_SLOTS:
+        st = get_slot_status(page, tomorrow, time_str, slot_num)
+        tomorrow_statuses[(time_str, slot_num)] = st
+        log.info(f"  {time_str} {SLOT_LABEL[slot_num]}: {st}")
+
+    available_tomorrow = [(t, s) for t, s in PRIORITY_SLOTS if tomorrow_statuses.get((t, s)) == "available"]
+    cancel_tomorrow    = [(t, s) for t, s in PRIORITY_SLOTS if tomorrow_statuses.get((t, s)) == "cancel"]
+
+    # ③-a: 明日が available かつ secured_date より近い → 明日を予約し、既存予約をキャンセル
+    step3a_succeeded = False
+    if available_tomorrow and secured_date is not None and tomorrow < secured_date:
+        t, s = available_tomorrow[0]
+        if make_reservation(page, tomorrow, t, s):
+            log.info(f"Tomorrow reserved. Cancelling existing reservation on {secured_date}…")
+            cancel_reservation(page, secured_date)
+            step3a_succeeded = True
+        else:
+            log.warning("③-a: Tomorrow reservation failed. Keeping existing reservation.")
+
+    # ③-b: ③-a が成功しなかった場合のみ、cancel スロットにキャンセル待ち登録
+    if not step3a_succeeded:
+        if cancel_tomorrow:
+            log.info(f"{len(cancel_tomorrow)} CANCEL slot(s) on {tomorrow} — registering cancel-wait")
+            for t, s in cancel_tomorrow:
+                register_cancel_wait(page, tomorrow, t, s)
+        else:
+            log.info(f"No CANCEL slots on {tomorrow}")
 
 
 if __name__ == "__main__":
