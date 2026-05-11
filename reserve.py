@@ -305,6 +305,9 @@ def run_reservation_logic(page: Page) -> None:
                 log.info(f"  {time_str} {SLOT_LABEL[slot_num]}: {st}")
 
             if all(s == "missing" for s in statuses.values()):
+                if target == today:
+                    log.info(f"All slots missing on {target} (today, slots likely past) — continuing to next day.")
+                    continue
                 log.info(f"All slots missing on {target} — outside booking window, stopping.")
                 break
 
