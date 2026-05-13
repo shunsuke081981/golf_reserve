@@ -15,7 +15,7 @@ on:
 jobs:
   reserve:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
@@ -26,7 +26,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install playwright
+          pip install playwright google-api-python-client google-auth
           playwright install chromium --with-deps
 
       - name: Run reservation script
@@ -34,3 +34,12 @@ jobs:
         env:
           SWING24_USERNAME: ${{ secrets.SWING24_USERNAME }}
           SWING24_PASSWORD: ${{ secrets.SWING24_PASSWORD }}
+
+      - name: Sync to Google Calendar
+        if: always()
+        run: python sync_calendar.py
+        env:
+          SWING24_USERNAME: ${{ secrets.SWING24_USERNAME }}
+          SWING24_PASSWORD: ${{ secrets.SWING24_PASSWORD }}
+          GOOGLE_CALENDAR_ID: ${{ secrets.GOOGLE_CALENDAR_ID }}
+          GOOGLE_CALENDAR_CREDENTIALS: ${{ secrets.GOOGLE_CALENDAR_CREDENTIALS }}
