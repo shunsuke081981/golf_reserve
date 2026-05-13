@@ -30,6 +30,7 @@ One-time setup:
 """
 from __future__ import annotations
 
+import base64
 import json
 import os
 import sys
@@ -127,7 +128,11 @@ def _build_service():
     creds_file = os.environ.get("GOOGLE_CALENDAR_CREDENTIALS_FILE")
 
     if creds_json:
-        info  = json.loads(creds_json)
+        raw = creds_json.strip()
+        try:
+            info = json.loads(raw)
+        except json.JSONDecodeError:
+            info = json.loads(base64.b64decode(raw))
         creds = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
     elif creds_file:
         creds = service_account.Credentials.from_service_account_file(creds_file, scopes=SCOPES)
