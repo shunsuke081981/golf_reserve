@@ -339,13 +339,12 @@ def run_reservation_logic(page: Page) -> None:
     available_tomorrow = [(t, s) for t, s in PRIORITY_SLOTS if tomorrow_statuses.get((t, s)) == "available"]
     cancel_tomorrow    = [(t, s) for t, s in PRIORITY_SLOTS if tomorrow_statuses.get((t, s)) == "cancel"]
 
-    # ③-a: 明日が available かつ secured_date より近い → 明日を予約し、既存予約をキャンセル
+    # ③-a: 明日が available かつ secured_date より近い → 明日を予約（既存予約はキャンセルしない）
     step3a_succeeded = False
     if available_tomorrow and secured_date is not None and tomorrow < secured_date:
         t, s = available_tomorrow[0]
         if make_reservation(page, tomorrow, t, s):
-            log.info(f"Tomorrow reserved. Cancelling existing reservation on {secured_date}…")
-            cancel_reservation(page, secured_date)
+            log.info(f"Tomorrow reserved. Keeping existing reservation on {secured_date}.")
             step3a_succeeded = True
         else:
             log.warning("③-a: Tomorrow reservation failed. Keeping existing reservation.")
