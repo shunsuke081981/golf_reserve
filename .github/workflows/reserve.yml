@@ -2,12 +2,7 @@ name: Golf Auto-Reservation
 
 on:
   schedule:
-    - cron: "53 23 * * *"   # 08:53 JST
-    - cron: "53 0 * * *"    # 09:53 JST
     - cron: "53 1 * * *"    # 10:53 JST
-    - cron: "53 2 * * *"    # 11:53 JST
-    - cron: "53 3 * * *"    # 12:53 JST
-    - cron: "53 4 * * *"    # 13:53 JST
   workflow_dispatch:
 
 jobs:
