@@ -265,12 +265,44 @@ def cancel_reservation(page: Page, date: datetime.date) -> bool:
     page.wait_for_load_state("networkidle")
 
     date_str = date.strftime("%Y/%m/%d")
-    try:
-        row = page.locator("tr").filter(has_text=date_str).filter(has_text="確定")
-        row.first.get_by_text("詳細").click()
-        page.wait_for_load_state("networkidle")
-        log.info(f"Detail page: {page.url}")
 
+    # Walk up from each '詳細' link until an ancestor containing both the
+    # date string and '確定' is found — handles tables where date and status
+    # are in separate <tr> rows.
+    detail_href = page.evaluate(
+        """(dateStr) => {
+            const links = Array.from(document.querySelectorAll('a'));
+            const candidates = links.filter(a => a.textContent.trim() === '詳細');
+            for (const link of candidates) {
+                let node = link;
+                for (let i = 0; i < 20; i++) {
+                    node = node.parentElement;
+                    if (!node) break;
+                    const text = node.textContent;
+                    if (text.includes(dateStr) && text.includes('確定')) {
+                        return link.getAttribute('href');
+                    }
+                }
+            }
+            return null;
+        }""",
+        date_str,
+    )
+
+    if not detail_href:
+        log.error(f"Detail link not found for {date_str} with '確定'")
+        page.screenshot(path="/tmp/swing24_cancel_reservation_error.png")
+        with open("/tmp/swing24_history_debug.html", "w", encoding="utf-8") as f:
+            f.write(page.content())
+        log.info("History page HTML saved to /tmp/swing24_history_debug.html")
+        return False
+
+    target_url = BASE_URL + detail_href if detail_href.startswith("/") else detail_href
+    page.goto(target_url)
+    page.wait_for_load_state("networkidle")
+    log.info(f"Detail page: {page.url}")
+
+    try:
         page.once("dialog", lambda d: d.accept())
         page.get_by_text("キャンセル").first.click()
         page.wait_for_load_state("networkidle")

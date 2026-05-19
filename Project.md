@@ -216,5 +216,7 @@ EVENT_IDS = {1: 15, 2: 22, 3: 23}  # 打席番号 → event_id
 ## 7. 変更履歴
 
 <!-- この以下は git commit 時に自動追記されます -->
+- 2026-05-19 17:43 JST: 7188211 Add golf_cancel.py and cancel_and_rebook.yml for manual cancel & rebook
 - 2026-05-17: プロジェクト初版作成
 - 2026-05-19: golf_cancel.py・cancel_and_rebook.yml を追加（手動キャンセル＆再予約機能）
+- 2026-05-19: cancel_reservation のセレクタを修正（日付と「確定」が別 tr にある構造に対応）
