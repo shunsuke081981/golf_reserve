@@ -266,13 +266,16 @@ def cancel_reservation(page: Page, date: datetime.date) -> bool:
 
     date_str = date.strftime("%Y/%m/%d")
 
-    # Walk up from each '詳細' link until an ancestor containing both the
-    # date string and '確定' is found — handles tables where date and status
-    # are in separate <tr> rows.
+    # For each '詳細' link, walk up to the LOWEST ancestor containing both
+    # dateStr and '確定', then pick the link whose ancestor text is SHORTEST
+    # (most specific card). This avoids grabbing a wrong link when a large
+    # parent element contains multiple reservations with different statuses.
     detail_href = page.evaluate(
         """(dateStr) => {
             const links = Array.from(document.querySelectorAll('a'));
             const candidates = links.filter(a => a.textContent.trim() === '詳細');
+            let bestHref = null;
+            let bestLen  = Infinity;
             for (const link of candidates) {
                 let node = link;
                 for (let i = 0; i < 20; i++) {
@@ -280,11 +283,15 @@ def cancel_reservation(page: Page, date: datetime.date) -> bool:
                     if (!node) break;
                     const text = node.textContent;
                     if (text.includes(dateStr) && text.includes('確定')) {
-                        return link.getAttribute('href');
+                        if (text.length < bestLen) {
+                            bestLen  = text.length;
+                            bestHref = link.getAttribute('href');
+                        }
+                        break; // lowest ancestor found for this link
                     }
                 }
             }
-            return null;
+            return bestHref;
         }""",
         date_str,
     )
