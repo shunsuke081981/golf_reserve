@@ -178,7 +178,19 @@ def cancel_reservation(page: Page, date: datetime.date) -> bool:
     target_url = BASE_URL + detail_href if detail_href.startswith("/") else detail_href
     page.goto(target_url)
     page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(2000)
     log.info(f"Detail page: {page.url}")
+
+    # Save detail page state for debugging before any interaction
+    page.screenshot(path="/tmp/golf_detail_before_cancel.png")
+    with open("/tmp/golf_detail_debug.html", "w", encoding="utf-8") as f:
+        f.write(page.content())
+    clickable = page.evaluate(
+        "() => Array.from(document.querySelectorAll('a,button,input[type=submit]'))"
+        ".map(e => e.tagName + ': ' + (e.textContent || e.value || '').trim())"
+        ".filter(t => t.length > 2)"
+    )
+    log.info(f"Clickable elements on detail page: {clickable}")
 
     try:
         page.once("dialog", lambda d: d.accept())
