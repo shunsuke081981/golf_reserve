@@ -1,0 +1,29 @@
+name: Golf Cancel & Rebook
+
+on:
+  workflow_dispatch:
+
+jobs:
+  cancel-rebook:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install playwright google-api-python-client google-auth
+          playwright install chromium --with-deps
+
+      - name: Cancel & rebook
+        run: python golf_cancel.py
+        env:
+          SWING24_USERNAME: ${{ secrets.SWING24_USERNAME }}
+          SWING24_PASSWORD: ${{ secrets.SWING24_PASSWORD }}
+          GOOGLE_CALENDAR_ID: ${{ secrets.GOOGLE_CALENDAR_ID }}
+          GOOGLE_CALENDAR_CREDENTIALS: ${{ secrets.GOOGLE_CALENDAR_CREDENTIALS }}
